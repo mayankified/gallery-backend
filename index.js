@@ -4,9 +4,11 @@ const multerS3 = require("multer-s3");
 const bodyParser = require("body-parser");
 const sqlite3 = require("sqlite3").verbose();
 const { S3 } = require("@aws-sdk/client-s3");
+const cors = require("cors");
 require("dotenv").config();
 
 const app = express();
+app.use(cors());
 app.use(bodyParser.json());
 
 // Configure AWS S3
