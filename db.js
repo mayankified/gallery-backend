@@ -19,8 +19,10 @@ db.serialize(() => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       room_id INTEGER,
       image_url TEXT NOT NULL,
+      user TEXT NOT NULL,
       upload_date TEXT NOT NULL,
       FOREIGN KEY(room_id) REFERENCES rooms(id)
     )
   `);
 });
+console.log("Database created successfully");

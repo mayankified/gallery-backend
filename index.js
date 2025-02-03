@@ -24,13 +24,13 @@ const s3 = new S3({
 const BUCKET_NAME = process.env.BUCKET_NAME;
 
 // Create a new SQLite database (or connect to the existing one)
-const db = new sqlite3.Database('gallery.db');
+const db = new sqlite3.Database("gallery.db");
 
 // Middleware for file uploads
 const upload = multer({
   storage: multerS3({
     s3: s3,
-    acl: 'public-read',
+    acl: "public-read",
     bucket: BUCKET_NAME,
     key: function (req, file, cb) {
       const roomId = req.body.roomId;
@@ -40,46 +40,66 @@ const upload = multer({
 });
 
 // API: Check Room and List Images
-app.get("/room/:roomId", async (req, res) => {
+app.post("/room/:roomId", async (req, res) => {
   const { roomId } = req.params;
+  const { username } = req.body; // e.g., "all" | "tinu" | "krishna" | etc.
 
   try {
-    // Fetch room details and images
-    db.all(
-      `SELECT rooms.name, images.image_url, images.upload_date 
-       FROM rooms 
-       JOIN images ON rooms.id = images.room_id 
-       WHERE rooms.name = ?`,
-      [roomId],
-      (err, rows) => {
-        if (err) {
-          return res.status(500).json({ success: false, message: "Database error", error: err });
-        }
-        if (rows.length > 0) {
-          return res.json({ success: true, images: rows });
-        } else {
-          return res.status(404).json({ success: false, message: "Room not found." });
-        }
+    // Base query (we'll build on top of this)
+    let query = `
+      SELECT rooms.name, images.image_url, images.upload_date, images.user
+      FROM rooms
+      JOIN images ON rooms.id = images.room_id
+      WHERE rooms.name = ?
+    `;
+    const params = [roomId];
+
+    // If username !== "all", we want images matching this username OR "all"
+
+    query += ` AND (images.user = ? OR images.user = "all")`;
+    params.push(username);
+
+    // If username === "all", we do NOT add any further filter on images.user
+    // so it returns all images in the given room.
+
+    db.all(query, params, (err, rows) => {
+      if (err) {
+        return res
+          .status(500)
+          .json({ success: false, message: "Database error", error: err });
       }
-    );
+      if (!rows || rows.length === 0) {
+        return res
+          .status(404)
+          .json({ success: false, message: "No images found for this room." });
+      }
+
+      return res.json({ success: true, images: rows });
+    });
   } catch (error) {
     console.error("Error fetching room:", error);
-    res.status(500).json({ success: false, message: "Error fetching room.", error });
+    res
+      .status(500)
+      .json({ success: false, message: "Error fetching room.", error });
   }
 });
 
 // API: Upload Multiple Images
 app.post("/upload", upload.array("images[]"), (req, res) => {
-  const { roomId } = req.body;
+  const { roomId, user } = req.body;
 
   if (!roomId) {
-    return res.status(400).json({ success: false, message: "Room ID is required." });
+    return res
+      .status(400)
+      .json({ success: false, message: "Room ID is required." });
   }
 
   // Insert room if it doesn't exist
   db.get("SELECT id FROM rooms WHERE name = ?", [roomId], (err, row) => {
     if (err) {
-      return res.status(500).json({ success: false, message: "Database error", error: err });
+      return res
+        .status(500)
+        .json({ success: false, message: "Database error", error: err });
     }
 
     let roomIdFromDb;
@@ -98,8 +118,13 @@ app.post("/upload", upload.array("images[]"), (req, res) => {
       files.forEach((file) => {
         const uploadDate = new Date().toISOString();
         db.run(
-          "INSERT INTO images (room_id, image_url, upload_date) VALUES (?, ?, ?)",
-          [roomId, `https://${BUCKET_NAME}.s3.amazonaws.com/${file.key}`, uploadDate]
+          "INSERT INTO images (room_id, image_url, upload_date,user) VALUES (?, ?, ?,?)",
+          [
+            roomId,
+            `https://${BUCKET_NAME}.s3.amazonaws.com/${file.key}`,
+            uploadDate,
+            user || "all",
+          ]
         );
       });
 
